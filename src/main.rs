@@ -1,20 +1,23 @@
 use std::collections::HashMap;
-use std::net::{TcpListener, TcpStream, Shutdown};
+use std::net::{TcpListener, TcpStream};
 use std::io::{BufRead, BufReader, Write};
 use std::thread;
+use std::sync::mpsc::{self, Sender};
 
 type Key = String;
 type Value = String;
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 struct Node {
+    id: u64,
     addr: String,
     storage: HashMap<Key, Value>,
 }
 
 impl Node {
-    fn new(addr: &str) -> Self {
+    fn new(id: u64, addr: &str) -> Self {
         Node {
+            id,
             addr: addr.to_string(),
             storage: HashMap::new(),
         }
@@ -24,44 +27,65 @@ impl Node {
         self.storage.insert(key, value);
     }
 
-    fn retrieve(&self, key: &Key) -> Option<&Value> {
+    fn retrieve(&self, key: &String) -> Option<&Value> {
         self.storage.get(key)
     }
 }
 
-enum Action {
-    Continue,
-    Terminate,
+fn handle_client(mut node: Node, mut stream: TcpStream, tx: Sender<bool>) {
+    let mut reader = BufReader::new(stream.try_clone().unwrap());
+    let mut request = String::new();
+
+    reader.read_line(&mut request).unwrap();
+    let key = request.trim().strip_prefix("GET ").unwrap();
+
+    if key == "terminate" {
+        println!("terminating by sending true");
+        tx.send(true).unwrap();
+    } else {
+        if let Some(value) = node.retrieve(&key.to_string()) {
+            writeln!(stream, "{}", value).unwrap();
+        } else {
+            writeln!(stream, "Key not found").unwrap();
+        }
+    }
 }
 
 fn main() {
-    let mut node1 = Node::new("127.0.0.1:8000");
-    let node2 = Node::new("127.0.0.1:8001");
+    let node1_addr = "127.0.0.1:8000";
+    let node2_addr = "127.0.0.1:8001";
+
+    let mut node1 = Node::new(1, node1_addr);
+    let node2 = Node::new(2, node2_addr);
 
     node1.store("key1".to_string(), "value1".to_string());
 
-    let node1_listener = TcpListener::bind(&node1.addr).unwrap();
+    let node1_listener = TcpListener::bind(node1_addr).unwrap();
+    let (tx, rx) = mpsc::channel();
 
-    // Spawn a thread to handle node1's incoming connections
     let node1_handle = thread::spawn(move || {
         for stream in node1_listener.incoming() {
             match stream {
                 Ok(stream) => {
-                    let storage_copy = node1.storage.clone();
-                    let action = handle_client(stream, storage_copy);
-                    if let Action::Terminate = action {
-                        break;
-                    }
+                    let node1_copy = node1.clone();
+                    let tx_copy = tx.clone();
+                    thread::spawn(move || handle_client(node1_copy, stream, tx_copy));
                 }
                 Err(e) => {
                     println!("Error encountered while accepting connection: {}", e);
                 }
             }
-        }
+            if rx.try_recv().is_ok() {
+                println!("try_recv something so we're terminating");
+                break;
+            } else {
+                println!("try_recv nothing, NOT terminating");
+            }
+       }
     });
 
     // Connect node2 to node1 and request data
-    let mut stream = TcpStream::connect(&node1.addr).unwrap();
+    let mut stream = TcpStream::connect(node1_addr).unwrap();
     writeln!(stream, "GET key1").unwrap();
 
     let mut reader = BufReader::new(stream);
@@ -70,30 +94,9 @@ fn main() {
 
     println!("Node2 received: {}", response.trim());
 
-    // Send termination command
-    let mut stream = TcpStream::connect(&node1.addr).unwrap();
-    writeln!(stream, "TERMINATE").unwrap();
+    // Close node1 listener
+    let mut stream = TcpStream::connect(node1_addr).unwrap();
+    writeln!(stream, "GET terminate").unwrap();
 
     node1_handle.join().unwrap();
-}
-
-fn handle_client(mut stream: TcpStream, storage: HashMap<Key, Value>) -> Action {
-    let mut reader = BufReader::new(stream.try_clone().unwrap());
-    let mut request = String::new();
-
-    reader.read_line(&mut request).unwrap();
-    if request.trim() == "TERMINATE" {
-        stream.shutdown(Shutdown::Both).unwrap();
-        return Action::Terminate;
-    }
-
-    let key = request.trim().strip_prefix("GET ").unwrap();
-
-    if let Some(value) = storage.get(key) {
-        writeln!(stream, "{}", value).unwrap();
-    } else {
-        writeln!(stream, "Key not found").unwrap();
-    }
-
-    Action::Continue
 }
