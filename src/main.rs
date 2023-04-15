@@ -30,62 +30,59 @@ impl Node {
     fn retrieve(&self, key: &String) -> Option<&Value> {
         self.storage.get(key)
     }
-}
 
-fn handle_client(mut node: Node, mut stream: TcpStream, tx: Sender<bool>) {
-    let mut reader = BufReader::new(stream.try_clone().unwrap());
-    let mut request = String::new();
+    fn start(self) -> thread::JoinHandle<()> {
+        let listener = TcpListener::bind(&self.addr).unwrap();
+        let (tx, rx) = mpsc::channel();
 
-    reader.read_line(&mut request).unwrap();
-    let key = request.trim().strip_prefix("GET ").unwrap();
+        thread::spawn(move || {
+            for stream in listener.incoming() {
+                match stream {
+                    Ok(stream) => {
+                        let node_copy = self.clone();
+                        let tx_copy = tx.clone();
+                        thread::spawn(move || Self::handle_client(node_copy, stream, tx_copy));
+                    }
+                    Err(e) => {
+                        println!("Error encountered while accepting connection: {}", e);
+                    }
+                }
+                if rx.try_recv().is_ok() {
+                    break;
+                }
+            }
+        })
+    }
 
-    if key == "terminate" {
-        println!("terminating by sending true");
-        tx.send(true).unwrap();
-    } else {
-        if let Some(value) = node.retrieve(&key.to_string()) {
-            writeln!(stream, "{}", value).unwrap();
+    fn handle_client(mut node: Node, mut stream: TcpStream, tx: Sender<bool>) {
+        let mut reader = BufReader::new(stream.try_clone().unwrap());
+        let mut request = String::new();
+
+        reader.read_line(&mut request).unwrap();
+        let key = request.trim().strip_prefix("GET ").unwrap();
+
+        if key == "terminate" {
+            tx.send(true).unwrap();
         } else {
-            writeln!(stream, "Key not found").unwrap();
+            if let Some(value) = node.retrieve(&key.to_string()) {
+                writeln!(stream, "{}", value).unwrap();
+            } else {
+                writeln!(stream, "Key not found").unwrap();
+            }
         }
     }
 }
 
 fn main() {
-    let node1_addr = "127.0.0.1:8000";
-    let node2_addr = "127.0.0.1:8001";
-
-    let mut node1 = Node::new(1, node1_addr);
-    let node2 = Node::new(2, node2_addr);
+    let mut node1 = Node::new(1, "127.0.0.1:8000");
+    let node2 = Node::new(2, "127.0.0.1:8001");
 
     node1.store("key1".to_string(), "value1".to_string());
 
-    let node1_listener = TcpListener::bind(node1_addr).unwrap();
-    let (tx, rx) = mpsc::channel();
-
-    let node1_handle = thread::spawn(move || {
-        for stream in node1_listener.incoming() {
-            match stream {
-                Ok(stream) => {
-                    let node1_copy = node1.clone();
-                    let tx_copy = tx.clone();
-                    thread::spawn(move || handle_client(node1_copy, stream, tx_copy));
-                }
-                Err(e) => {
-                    println!("Error encountered while accepting connection: {}", e);
-                }
-            }
-            if rx.try_recv().is_ok() {
-                println!("try_recv something so we're terminating");
-                break;
-            } else {
-                println!("try_recv nothing, NOT terminating");
-            }
-       }
-    });
+    let node1_handle = node1.start();
 
     // Connect node2 to node1 and request data
-    let mut stream = TcpStream::connect(node1_addr).unwrap();
+    let mut stream = TcpStream::connect(&node1.addr).unwrap();
     writeln!(stream, "GET key1").unwrap();
 
     let mut reader = BufReader::new(stream);
@@ -95,7 +92,7 @@ fn main() {
     println!("Node2 received: {}", response.trim());
 
     // Close node1 listener
-    let mut stream = TcpStream::connect(node1_addr).unwrap();
+    let mut stream = TcpStream::connect(&node1.addr).unwrap();
     writeln!(stream, "GET terminate").unwrap();
 
     node1_handle.join().unwrap();
