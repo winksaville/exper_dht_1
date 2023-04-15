@@ -2,7 +2,6 @@ use std::collections::HashMap;
 use std::net::{TcpListener, TcpStream};
 use std::io::{BufRead, BufReader, Write};
 use std::thread;
-use std::sync::mpsc::{self, Sender};
 
 type Key = String;
 type Value = String;
@@ -33,28 +32,27 @@ impl Node {
 
     fn start(self) -> thread::JoinHandle<()> {
         let listener = TcpListener::bind(&self.addr).unwrap();
-        let (tx, rx) = mpsc::channel();
 
         thread::spawn(move || {
             for stream in listener.incoming() {
                 match stream {
                     Ok(stream) => {
                         let node_copy = self.clone();
-                        let tx_copy = tx.clone();
-                        thread::spawn(move || Self::handle_client(node_copy, stream, tx_copy));
+                        let client_status = Self::handle_client(node_copy, stream);
+
+                        if client_status == ClientStatus::Terminate {
+                            break;
+                        }
                     }
                     Err(e) => {
                         println!("Error encountered while accepting connection: {}", e);
                     }
                 }
-                if rx.try_recv().is_ok() {
-                    break;
-                }
             }
         })
     }
 
-    fn handle_client(mut node: Node, mut stream: TcpStream, tx: Sender<bool>) {
+    fn handle_client(mut node: Node, mut stream: TcpStream) -> ClientStatus {
         let mut reader = BufReader::new(stream.try_clone().unwrap());
         let mut request = String::new();
 
@@ -62,15 +60,22 @@ impl Node {
         let key = request.trim().strip_prefix("GET ").unwrap();
 
         if key == "terminate" {
-            tx.send(true).unwrap();
+            ClientStatus::Terminate
         } else {
             if let Some(value) = node.retrieve(&key.to_string()) {
                 writeln!(stream, "{}", value).unwrap();
             } else {
                 writeln!(stream, "Key not found").unwrap();
             }
+            ClientStatus::Continue
         }
     }
+}
+
+#[derive(PartialEq, Eq)]
+enum ClientStatus {
+    Continue,
+    Terminate,
 }
 
 fn main() {
