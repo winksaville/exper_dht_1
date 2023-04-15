@@ -74,15 +74,18 @@ impl Node {
 }
 
 fn main() {
-    let mut node1 = Node::new(1, "127.0.0.1:8000");
-    let node2 = Node::new(2, "127.0.0.1:8001");
+    let node1_addr = "127.0.0.1:8000";
+    let node2_addr = "127.0.0.1:8001";
+
+    let mut node1 = Node::new(1, node1_addr);
+    let node2 = Node::new(2, node2_addr);
 
     node1.store("key1".to_string(), "value1".to_string());
 
     let node1_handle = node1.start();
 
     // Connect node2 to node1 and request data
-    let mut stream = TcpStream::connect(&node1.addr).unwrap();
+    let mut stream = TcpStream::connect(node1_addr).unwrap();
     writeln!(stream, "GET key1").unwrap();
 
     let mut reader = BufReader::new(stream);
@@ -92,7 +95,7 @@ fn main() {
     println!("Node2 received: {}", response.trim());
 
     // Close node1 listener
-    let mut stream = TcpStream::connect(&node1.addr).unwrap();
+    let mut stream = TcpStream::connect(node1_addr).unwrap();
     writeln!(stream, "GET terminate").unwrap();
 
     node1_handle.join().unwrap();
