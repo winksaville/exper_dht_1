@@ -25,24 +25,30 @@ fn main() {
     let mut client = TcpStream::connect(node1_addr).unwrap();
     writeln!(client, "STORE key1 value1").unwrap();
 
-    println!(r#"client2 connects to node1_addr and issues "GET key1""#);
+    println!(r#"client issues "GET key1""#);
     let mut client2 = TcpStream::connect(node1_addr).unwrap();
     writeln!(client2, "GET key1").unwrap();
+    writeln!(client2, "GET key1").unwrap();
 
-    println!("read result using client2");
+    println!("client read response");
     let mut response = String::new();
-    BufReader::new(client2.try_clone().unwrap()).read_line(&mut response).unwrap();
+    //BufReader::new(client2.try_clone().unwrap()).read_line(&mut response).unwrap();
+    BufReader::new(client.try_clone().unwrap()).read_line(&mut response).unwrap();
 
     println!("Response: {}", response);
 
-    println!("issue terminate via client3");
     // Terminate the listener threads
+    println!("issue terminate to node1");
     let mut client3 = TcpStream::connect(node1_addr).unwrap();
     writeln!(client3, "GET terminate").unwrap();
 
+    println!("issue terminate to node1");
+    let mut client4 = TcpStream::connect(node2_addr).unwrap();
+    writeln!(client4, "GET terminate").unwrap();
+
     println!("wait on handle1");
     handle1.join().unwrap();
-    println!("wait on handle1");
+    println!("wait on handle2");
     handle2.join().unwrap();
 
     println!("main:-1");
