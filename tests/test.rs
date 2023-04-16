@@ -1,13 +1,14 @@
-mod node;
-
-use node::Node;
 use std::io::{BufRead, BufReader, Write};
 use std::net::TcpStream;
 use std::thread;
 
-fn main() {
-    let node1_addr = "127.0.0.1:8000";
-    let node2_addr = "127.0.0.1:8001";
+// Import the module from the main project
+use my_dht::node::Node;
+
+#[test]
+fn two_node_test() {
+    let node1_addr = "127.0.0.1:9000";
+    let node2_addr = "127.0.0.1:9001";
 
     let mut node1 = Node::new(1, node1_addr);
     let mut node2 = Node::new(2, node2_addr);
@@ -31,7 +32,8 @@ fn main() {
 
     let mut response = String::new();
     BufReader::new(stream2).read_line(&mut response).unwrap();
-    println!("Retrieved from node2: {}", response.trim());
+
+    assert_eq!("value1", response.trim());
 
     // Terminate node1
     let mut stream1 = TcpStream::connect(node1_addr).unwrap();
