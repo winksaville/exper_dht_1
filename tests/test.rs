@@ -1,6 +1,5 @@
 use std::io::{BufRead, BufReader, Write};
 use std::net::TcpStream;
-use std::thread;
 
 // Import the module from the main project
 use my_dht::node::Node;
@@ -18,9 +17,6 @@ fn two_node_test() {
 
     let handle1 = node1.start();
     let handle2 = node2.start();
-
-    // Allow nodes to start before sending messages
-    thread::sleep(std::time::Duration::from_secs(1));
 
     // Store a value in node1
     let mut stream1 = TcpStream::connect(node1_addr).unwrap();

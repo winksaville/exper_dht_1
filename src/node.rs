@@ -1,12 +1,14 @@
 use std::collections::HashMap;
 use std::net::{TcpListener, TcpStream};
 use std::io::{BufRead, BufReader, Write};
+use std::sync::mpsc;
 use std::thread;
 
 type Key = String;
 type Value = String;
 
 #[derive(Debug, Clone)]
+#[allow(unused)]
 pub struct Node {
     id: u64,
     pub addr: String,
@@ -29,9 +31,12 @@ impl Node {
     }
 
     pub fn start(mut self) -> thread::JoinHandle<()> {
+        let (started_tx, started_rx) = mpsc::channel::<()>();
+
         let listener = TcpListener::bind(&self.addr).unwrap();
 
-        thread::spawn(move || {
+        let join_handle = thread::spawn(move || {
+            started_tx.send(()).unwrap();
             for stream in listener.incoming() {
                 match stream {
                     Ok(stream) => {
@@ -46,7 +51,11 @@ impl Node {
                     }
                 }
             }
-        })
+        });
+
+        started_rx.recv().unwrap();
+
+        join_handle
     }
 
     fn handle_client(&mut self, mut stream: TcpStream) -> ClientStatus {
